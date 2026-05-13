@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.python-version
+
+# Local state — Scout's SQLite database holds your refresh history,
+# baselines, audit log, and the Anthropic api_cache. Each install owns
+# its own; never commit it.
+scout.db
+scout.db-journal
+scout.db-wal
+scout.db-shm
+*.db.template
+
+# Secrets and config
+.env
+.env.*
+!.env.example
+
+# Run logs from agent.py / pull_jobs.py / seed_scenario.py / dev.mjs
+*.log
+runthrough*.log
+seed-*.log
+seed_*.log
+hydrate*.log
+broker*.log
+pull_after_seed.log
+
+# Presentation / marketing artifacts (not code; live elsewhere)
+*.html
+*.svg
+linkedin-post.txt
+LINKEDIN.md
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
