@@ -37,11 +37,11 @@ from tableau_tools import (
 def _broker_policy(target_name: str) -> dict:
     """Ask the credential broker whether it can embed creds for this target.
 
-    Why this isn't cred_store.lookup(): the agent does not hold SCOUT_CRED_*
-    env vars. Only the broker does. The agent only learns whether creds
-    *exist* (yes/no) — it never sees them.
+    The agent never reads credentials directly. The broker (if running) holds
+    them; the agent only learns whether creds *exist* (yes/no) and never sees
+    the values themselves.
 
-    In OSS Scout there is no broker; SCOUT_BROKER_URL is unset and this
+    In OSS Scout there is no broker — SCOUT_BROKER_URL is unset and this call
     short-circuits without touching the network. The broker ships with
     TableauOps Autopilot.
     """
