@@ -119,7 +119,7 @@ pull_jobs.py        ← refresh-history ingestion
 
 ## License
 
-[Apache 2.0](LICENSE). Use it, fork it, ship it.
+[Apache 2.0](LICENSE).
 
 ## Contributing
 
