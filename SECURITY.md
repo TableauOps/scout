@@ -15,9 +15,8 @@ We'll acknowledge within 72 hours and keep you posted on the fix. Once a patch s
 
 ## What's in scope
 
-- Anything in this repository: `agent.py`, `agent_loop.py`, `db.py`, `tableau_tools.py`, `slack.py`, `remediation.py`, etc.
+- Anything in this repository: `agent.py`, `agent_loop.py`, `db.py`, `tableau_tools.py`, `remediation.py`, etc.
 - The Tableau API client patterns (auth, session handling, rate limiting)
-- The Slack webhook posting path
 - The Anthropic API caching layer (`api_cache` table in `scout.db`)
 - Any scenario where Scout could leak credentials, PII, or secrets to a place it shouldn't
 
@@ -34,8 +33,8 @@ For threat modeling:
 - **Reads** from Tableau Cloud / Server via the configured PAT (REST + Metadata API)
 - **Reads + writes** to a local SQLite file (`scout.db`)
 - **Writes** to Anthropic's API (LLM calls, with prompt caching)
-- **Writes** to your Slack webhook URL (if configured)
 - **Does NOT** call `update_*`, `refresh()`, `embed_credentials`, or any other mutating Tableau API
+- **Does NOT** post to Slack, PagerDuty, Teams, email, or any external delivery destination — delivery lives in TableauOps Autopilot
 - **Does NOT** phone home to tableauops.com or anywhere else
 - **Does NOT** persist credentials beyond the `.env` file the operator provides
 

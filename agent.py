@@ -38,26 +38,27 @@ console = Console()
 
 
 # ---------------------------------------------------------------------------
-# Autonomy level — asked once at startup; controls Block 9 behavior
+# Autonomy — Scout OSS is fixed at level 1 (plan-only).
 #
-#   1 plan-only      silent recon; never call in, never execute
-#   2 notify-owner   Slack the owner with diagnosis + plain-English fix steps
+# Scout watches and diagnoses; it does not deliver, notify, or execute.
+# Every finding lands in scout.db's audit_log and is printed to the terminal
+# in plain English. Whoever runs Scout decides what to do next.
 #
-# Scout itself is hard-capped at 2 (eyes-on, hands-off). Levels 3–5 live in
-# TableauOps Autopilot — a separate product that subscribes to Scout's
-# recommendations and executes the safe ones. See https://tableauops.com/scout
+# Higher levels — notify owner (Slack/PagerDuty/Teams), confirm-each-action,
+# auto-safe execution, full autonomy — live in TableauOps Autopilot, the
+# paid action arm. See https://tableauops.com/scout
 # ---------------------------------------------------------------------------
-MAX_AUTONOMY = 2
-SLACK_ACTIONS = {"notify_owner", "flag_drift_for_owner"}
+MAX_AUTONOMY = 1
 
 def _autopilot_upgrade_message(requested: int) -> str:
     return (
         f"[bold red]Autonomy {requested} is out of scope for Scout.[/bold red]\n\n"
-        "Scout is a recon agent — it watches, diagnoses, and calls it in. "
-        "Levels 3–5 (confirm-each, auto-safe, full-autonomy) require "
-        "[bold]TableauOps Autopilot[/bold], the paid action arm.\n\n"
-        "  → [link=https://tableauops.com/scout?utm_source=cli]https://tableauops.com/scout[/link]\n\n"
-        "Run Scout at level 1 (silent recon) or 2 (call it in to Slack)."
+        "Scout OSS runs at level 1 — it watches and diagnoses; findings land in "
+        "scout.db's audit_log and on the terminal. It does not deliver to Slack, "
+        "page anyone, or mutate Tableau.\n\n"
+        "Levels 2–5 — notify owner (Slack/PagerDuty/Teams), confirm-each-action, "
+        "auto-safe execution, full autonomy — live in [bold]TableauOps Autopilot[/bold].\n\n"
+        "  → [link=https://tableauops.com/scout?utm_source=cli]https://tableauops.com/scout[/link]"
     )
 
 def _resolve_autonomy() -> int:
@@ -67,44 +68,24 @@ def _resolve_autonomy() -> int:
     elif os.environ.get("SCOUT_AUTONOMY"):
         raw = os.environ["SCOUT_AUTONOMY"]
 
-    if raw is not None:
-        try:
-            level = int(raw)
-        except ValueError:
-            console.print(f"[red]Invalid autonomy value: {raw!r}. Expected 1 or 2.[/red]")
-            sys.exit(2)
-        if level > MAX_AUTONOMY:
-            console.print(Panel.fit(_autopilot_upgrade_message(level), title="[bold]Autopilot required[/bold]", border_style="red"))
-            sys.exit(2)
-        if level < 1:
-            console.print(f"[red]Autonomy must be 1 or 2; got {level}.[/red]")
-            sys.exit(2)
-        return level
+    if raw is None:
+        return 1
 
-    console.print(
-        Panel.fit(
-            "[bold]Select autonomy level:[/bold]\n"
-            "  [cyan]1[/cyan]  Plan only      — silent recon; never call in\n"
-            "  [cyan]2[/cyan]  Notify owner   — Slack the owner with diagnosis + fix steps  [dim](default)[/dim]\n\n"
-            "[dim]Scout is capped at 2 (eyes-on, hands-off). Execution lives in TableauOps Autopilot.[/dim]",
-            title="[bold]Autonomy[/bold]",
-            border_style="cyan",
-        )
-    )
-    while True:
-        ans = input("Level [1-2, default 2]: ").strip() or "2"
-        if ans in ("1", "2"):
-            return int(ans)
-        if ans in ("3", "4", "5"):
-            console.print(Panel.fit(_autopilot_upgrade_message(int(ans)), title="[bold]Autopilot required[/bold]", border_style="red"))
-            continue
-        console.print("[red]Enter 1 or 2.[/red]")
+    try:
+        level = int(raw)
+    except ValueError:
+        console.print(f"[red]Invalid autonomy value: {raw!r}. Scout OSS runs at level 1 only.[/red]")
+        sys.exit(2)
+    if level == 1:
+        return 1
+    if level >= 2:
+        console.print(Panel.fit(_autopilot_upgrade_message(level), title="[bold]Autopilot required[/bold]", border_style="red"))
+        sys.exit(2)
+    console.print(f"[red]Autonomy must be 1; got {level}.[/red]")
+    sys.exit(2)
 
 AUTONOMY = _resolve_autonomy()
-AUTONOMY_LABEL = {
-    1: "plan-only",
-    2: "notify-owner",
-}[AUTONOMY]
+AUTONOMY_LABEL = "plan-only"
 
 
 def _check_required_env() -> None:
@@ -154,33 +135,25 @@ def _print_preflight() -> None:
     server_env = os.environ.get("TABLEAU_SERVER", "[red]not set[/red]")
     pat_env    = "[green]set[/green]" if os.environ.get("TABLEAU_PAT_NAME") and os.environ.get("TABLEAU_PAT_SECRET") else "[red]not set[/red]"
     anth_env   = "[green]set[/green]" if (os.environ.get("ANTHROPIC_KEY") or os.environ.get("ANTHROPIC_API_KEY")) else "[red]not set[/red]"
-    slack_env  = "[green]configured[/green]" if os.environ.get("SLACK_WEBHOOK_URL") else "[yellow]not set — falls back to console panel[/yellow]"
     replay     = os.environ.get("REPLAY_MODE") == "1"
     success_t  = os.environ.get("SCOUT_SUCCESS_TARGET", "100.0")
     model      = os.environ.get("SCOUT_MODEL", "claude-opus-4-7")
 
-    mode_blurb = {
-        1: "[bold]Plan-only.[/bold] Scout watches, diagnoses, writes the audit log. [bold]No Slack[/bold], no notifications.",
-        2: "[bold]Notify-owner.[/bold] Scout watches, diagnoses, and Slacks the right human with the diagnosis and UI fix steps. Never mutates Tableau.",
-    }[AUTONOMY]
-
     plan = Table.grid(padding=(0, 2))
     plan.add_column(style="bold cyan", no_wrap=True)
     plan.add_column()
-    plan.add_row("Mode",     f"autonomy {AUTONOMY} ({AUTONOMY_LABEL}) — {mode_blurb}")
+    plan.add_row("Mode",     "[bold]Plan-only.[/bold] Scout watches, diagnoses, writes the audit log + terminal. No delivery, no notification, no execution.")
     plan.add_row("Reads",    f"Tableau ([dim]{server_env} · site={site_env}[/dim]) [dim]· read-only[/dim]")
     plan.add_row("Calls",    f"Anthropic [dim]({model})[/dim]" + (" [yellow](REPLAY_MODE=1; cache-only, no live calls)[/yellow]" if replay else " [dim]· will use credits unless cache hits[/dim]"))
     plan.add_row("Writes",   "scout.db (local SQLite — refresh_history, baselines, audit_log, incidents)")
-    if AUTONOMY == 2:
-        plan.add_row("",     "Slack webhook " + slack_env)
     plan.add_row("",         "")
-    plan.add_row("Won't do", "[bold]Mutate Tableau.[/bold] Read-only on Tableau API. No retries, no credential edits, no schedule writes — execution lives in [link=https://tableauops.com/scout]TableauOps Autopilot[/link].")
+    plan.add_row("Won't do", "[bold]Notify or mutate.[/bold] Scout OSS never posts to Slack, never pages owners, never edits Tableau. Delivery + execution live in [link=https://tableauops.com/scout]TableauOps Autopilot[/link].")
     plan.add_row("",         "")
     plan.add_row("Creds",    f"Tableau PAT {pat_env}  ·  Anthropic API key {anth_env}")
     plan.add_row("Bar",      f"success-rate target = {success_t}% (any gap is treated as worth investigating)")
 
     console.print(Panel(plan, title="[bold]Scout — Tableau ops recon[/bold] [dim]· about to run[/dim]", border_style="cyan"))
-    console.print("[dim]Press Ctrl+C now to abort. Run with --autonomy 1 for silent (no Slack) mode.[/dim]\n")
+    console.print("[dim]Press Ctrl+C now to abort.[/dim]\n")
 
 
 _check_required_env()
@@ -629,11 +602,10 @@ with _sign_in_cm(server, auth):
     # -----------------------------------------------------------------------
     # Block 7 — Recommendation (Scout calls it in; never executes)
     # -----------------------------------------------------------------------
-    # OSS Scout pass the LLM's recommendation through in plan-shape so the FSM,
-    # audit log, and Slack code downstream all see the same dict. We deliberately
-    # do NOT translate to wire-format API calls — that's TableauOps Autopilot's
-    # job, and shipping it here would leak REST endpoints into the audit log /
-    # Slack notification.
+    # OSS Scout passes the LLM's recommendation through in plan-shape so the
+    # FSM and audit log see the same dict. We deliberately do NOT translate
+    # to wire-format API calls — that's TableauOps Autopilot's job, and
+    # shipping it here would leak REST endpoints into the audit log.
     _ACTIONABLE = {
         "retry_refresh", "embed_credentials", "approve_schedule_change",
         "flag_drift_for_owner", "notify_owner",
@@ -668,7 +640,7 @@ with _sign_in_cm(server, auth):
         for b in plan["blockers"]:
             console.print(f"  • {b}")
     elif plan["executable"]:
-        console.print("[yellow]This recommendation is actionable. Scout will call it in (autonomy 2) or stay silent (autonomy 1).[/yellow]")
+        console.print("[yellow]This recommendation is actionable. Scout OSS logs it to the audit log; delivery and execution live in TableauOps Autopilot.[/yellow]")
 
     # -----------------------------------------------------------------------
     # Block 7.5 — Incident FSM: open/transition the case Scout is working
@@ -728,10 +700,7 @@ with _sign_in_cm(server, auth):
         result="planned (dry-run)",
     )
 
-    mode_note = {
-        1: "[dim]plan-only mode[/dim] (Block 9 will skip the call-in)",
-        2: "[bold cyan]notify-owner mode[/bold cyan] (Block 9 will Slack the owner with diagnosis + UI fix steps)",
-    }[AUTONOMY]
+    mode_note = "[dim]plan-only mode[/dim] (Scout never delivers or executes; the recommendation lives in the audit log above)"
     console.print(
         Panel.fit(
             f"[green]audit_id[/green]={audit_id}  "
@@ -745,95 +714,39 @@ with _sign_in_cm(server, auth):
     )
 
     # -----------------------------------------------------------------------
-    # Block 9 — Execute remediation per autonomy level
+    # Block 9 — Fix steps (Scout OSS renders them; it doesn't deliver)
     # -----------------------------------------------------------------------
+    # Scout OSS is fixed at autonomy 1: the diagnosis is already in scout.db's
+    # audit_log (Block 8). Block 9 renders the structured UI fix steps for the
+    # operator so they have a copy-pastable plan in the terminal. Delivery
+    # (Slack/PagerDuty/Teams) and execution (retry_refresh, embed_credentials,
+    # schedule writes) live in TableauOps Autopilot — a separate paid product
+    # that subscribes to Scout's recommendations. https://tableauops.com/scout
     executed = False
-
-    # Scout's only outbound write is the Slack call-in. Any actual Tableau
-    # mutation (retry_refresh, embed_credentials, approve_schedule_change live
-    # in TableauOps Autopilot — a separate paid product that subscribes to
-    # Scout's recommendations and executes the safe ones. See
-    # https://tableauops.com/scout for details.
-
-    def _post_owner_slack(plan: dict, kind: str) -> tuple[bool, str]:
-        """Build a rich Slack message (diagnosis + UI fix steps) and post.
-
-        Falls back to a console panel when SLACK_WEBHOOK_URL is unset, so a
-        demo / dev run is still readable.
-        """
-        import slack
+    if plan["executable"]:
         from remediation import fix_steps_for, build_owner_summary
-        from tableau_tools import get_datasource_owner
-
-        target_name = plan["target_name"]
-        owner_mention = None
-        try:
-            owner = get_datasource_owner(target_name) or {}
-            who = owner.get("name") or owner.get("email")
-            if who:
-                owner_mention = f"owner: *{who}*"
-        except Exception:
-            pass  # owner lookup is best-effort
-
-        diagnosis = build_owner_summary(plan)
-        fix_steps = fix_steps_for(plan)
-        autonomy_note = (
-            f"Sent by Scout at autonomy level {AUTONOMY} ({AUTONOMY_LABEL}). "
-            f"Scout watches and calls in; it never mutates Tableau. "
-            f"For automated remediation see TableauOps Autopilot — https://tableauops.com/scout"
+        summary = build_owner_summary(plan)
+        steps   = fix_steps_for(plan)
+        body    = [f"[bold]{summary}[/bold]", ""]
+        if steps:
+            body.append("[bold]Direct steps:[/bold]")
+            for i, step in enumerate(steps, start=1):
+                body.append(f"  {i}. {step}")
+            body.append("")
+        body.append(
+            f"[dim]Logged to audit_log (id={audit_id}). Scout OSS does not deliver or execute — "
+            f"upgrade to TableauOps Autopilot for owner notification (Slack/PagerDuty/Teams) "
+            f"and automated remediation. → https://tableauops.com/scout[/dim]"
         )
-
-        text = f"Scout {kind}: {target_name} — {plan.get('reason') or '(no reason)'}"
-        blocks = slack.build_owner_blocks(
-            target_name=target_name,
-            diagnosis=diagnosis,
-            fix_steps=fix_steps,
-            owner_mention=owner_mention,
-            autonomy_note=autonomy_note,
-        )
-        return slack.post_message(text, blocks)
-
-    if not plan["executable"]:
-        console.print("[dim]Block 9: plan is not executable — skipping.[/dim]")
-    elif AUTONOMY == 1:
-        console.print("[dim]Block 9: autonomy=1 (plan-only) — skipping execution and notification.[/dim]")
-    elif AUTONOMY == 2:
-        # Notify-owner mode: any executable plan is rerouted to a Slack post
-        # with diagnosis + direct fix steps. We do NOT execute the underlying
-        # remediation. Owner takes it from here.
         console.print(
-            Panel.fit(
-                f"[bold cyan]Notify-owner mode[/bold cyan] — rerouting [white]{plan['action']}[/white] on "
-                f"[white]{plan['target_name']}[/white] to a Slack post; not executing.",
-                title="[bold]Block 9 — Notification[/bold]",
+            Panel(
+                "\n".join(body),
+                title=f"[bold]Block 9 — Fix steps for {plan['target_name']}[/bold]",
                 border_style="cyan",
             )
         )
-        try:
-            ok, result_str = _post_owner_slack(plan, kind="notify_owner")
-            color = "green" if ok else "yellow"
-            glyph = "✓" if ok else "•"
-            console.print(f"[{color}]{glyph} {result_str}[/{color}]")
-            notify_audit_id = audit_write(
-                actor=f"agent({AUTONOMY_LABEL})",
-                action="notify_owner",
-                target=plan["target_name"],
-                dry_run=False,
-                payload={**plan, "rerouted_from": plan["action"], "incident_id": incident_id},
-                autonomy_level=AUTONOMY,
-                result=result_str,
-            )
-            # Incident stays OPEN — owner closes it externally. Just note the handoff.
-            if incident_id is not None and ok:
-                set_incident_status(incident_id, "fix_proposed", notes=f"delegated to owner via Slack (audit#{notify_audit_id})")
-            executed = ok
-        except Exception as e:
-            err = f"error: {type(e).__name__}: {str(e)[:200]}"
-            console.print(f"[red]✗ {err}[/red]")
-            audit_write(actor=f"agent({AUTONOMY_LABEL})", action="notify_owner", target=plan["target_name"], dry_run=False, payload={**plan, "incident_id": incident_id}, autonomy_level=AUTONOMY, result=err)
-    # No `else` — autonomy is hard-capped at MAX_AUTONOMY (2). Execution paths
-    # for confirm-each / auto-safe / full-autonomy live in the paid TableauOps
-    # Autopilot product, not in OSS Scout.
+    else:
+        console.print("[dim]Block 9: plan is not executable — nothing to do beyond Block 8.[/dim]")
 
     # -----------------------------------------------------------------------
     # Block 10 — Reproducibility recap (audit log + incidents + cache stats)
@@ -913,10 +826,7 @@ with _sign_in_cm(server, auth):
     next_steps = Table.grid(padding=(0, 2))
     next_steps.add_column(style="bold cyan", no_wrap=True)
     next_steps.add_column()
-    next_steps.add_row("Replay this run",  "[cyan]REPLAY_MODE=1 python agent.py --autonomy 2[/cyan] — re-run from cache, no Anthropic credits used")
-    if not os.environ.get("SLACK_WEBHOOK_URL"):
-        next_steps.add_row("Wire Slack",   "Set SLACK_WEBHOOK_URL in .env — the next autonomy-2 run will post the diagnosis to your channel")
-    if AUTONOMY == 1:
-        next_steps.add_row("Notify owners","Re-run with [cyan]--autonomy 2[/cyan] — Scout will Slack the right human with diagnosis + UI fix steps")
-    next_steps.add_row("Close the loop",  "[link=https://tableauops.com/scout?utm_source=cli]TableauOps Autopilot[/link] — actually fix what Scout finds, plus the dashboard, fleet view, and persistent baselines")
+    next_steps.add_row("Replay this run",  "[cyan]REPLAY_MODE=1 python agent.py[/cyan] — re-run from cache, no Anthropic credits used")
+    next_steps.add_row("Get it delivered", "Scout OSS doesn't deliver. [link=https://tableauops.com/scout?utm_source=cli]TableauOps Autopilot[/link] adds Slack / PagerDuty / Teams + on-call routing.")
+    next_steps.add_row("Close the loop",   "[link=https://tableauops.com/scout?utm_source=cli]TableauOps Autopilot[/link] — actually fix what Scout finds, plus the dashboard, fleet view, and persistent baselines")
     console.print(Panel(next_steps, title="[bold]What now?[/bold]", border_style="cyan"))

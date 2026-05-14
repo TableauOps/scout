@@ -1,8 +1,9 @@
-"""Slack-message helpers for OSS Scout's notify_owner path.
+"""Fix-step renderer for OSS Scout's recommendations.
 
-Scout (OSS) only watches and calls in. This module renders plain-English
-diagnosis + UI/desktop fix steps for the Slack message that goes to the
-target's owner. No REST endpoints, no HTTP method names, no payload bodies.
+Scout (OSS) only watches and logs. This module renders plain-English
+diagnosis + UI/desktop fix steps that get printed to the terminal and
+attached to the audit log entry. No REST endpoints, no HTTP method names,
+no payload bodies — UI walkthroughs only.
 
 The action arm — wire-format API calls, the credential broker, the executor —
 lives in TableauOps Autopilot, not here.
@@ -54,7 +55,7 @@ def fix_steps_for(plan: dict) -> list[str]:
 
 
 def build_owner_summary(plan: dict, history_snippet: str | None = None) -> str:
-    """One-line diagnosis for the Slack message body."""
+    """One-line diagnosis for the terminal panel + audit log entry."""
     parts = []
     if plan.get("reason"):
         parts.append(plan["reason"])
